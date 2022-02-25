@@ -1,0 +1,263 @@
+---
+title: "Wk5Exercise"
+author: "Matt Ming"
+date: "2/21/2022"
+output: html_document
+---
+
+# Set up
+
+Loading in the tidyverse packages to enable the later functions
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(mosaic)
+```
+
+# Challenge 1
+
+First, let's load the IMDb dataset
+```{r}
+f <- "https://raw.githubusercontent.com/difiore/ada-2022-datasets/master/IMDB-movies.csv"
+data <- read_csv(f,col_names = TRUE)
+head(data)
+```
+
+Now, filter the data by only those movies with runtime between 1 - 3 hours
+and made between the years 1920 - 1979.  We should be left with a dataframe with
+5651 observations
+```{r}
+data <- data %>% 
+  filter(runtimeMinutes %in% 60:180 & startYear %in% 1920:1979) %>%
+  mutate(decade = case_when(startYear %in% 1920:1929 ~ "20s",
+                            startYear %in% 1930:1939 ~ "30s",
+                            startYear %in% 1940:1949 ~ "40s",
+                            startYear %in% 1950:1959 ~ "50s",
+                            startYear %in% 1960:1969 ~ "60s",
+                            startYear %in% 1970:1979 ~ "70s"))
+```
+
+Now, using ggplot to get a histogram of the distribution of runtimeMinutes for
+each decade. (Hint: use facet_wrap())
+```{r}
+p <- ggplot(data,aes(runtimeMinutes)) + facet_wrap(~decade,ncol = 3) + 
+  geom_histogram(binwidth = 5)
+print(p)
+```
+
+Getting the mean and standard deviation for movie runtimes in minutes per decade
+then save the calculations in a new dataframe called **results**
+```{r}
+results <- data %>% select(runtimeMinutes,decade) %>% group_by(decade) %>%
+  summarize(runtimes_means = mean(runtimeMinutes),
+            runtimes_sds = sd(runtimeMinutes))
+```
+
+Drawing samples of 100 movies from each decade and calculating the single-sample
+mean and sd in runtimeMinutes per decade.  We can then use the single-sample
+sd and sample size to estimate the standard error by the formula  
+$SE\approx\sigma_x/\sqrt{n}$ where $\sigma_x$ = sd of the sample, and $n$ = 
+sample size.  We then want to compare these estimates to SE estimates using the 
+population mean and sd (again using sample size of 100)
+```{r}
+results <- results %>% mutate(sample_mean = rep(0,6),
+                              sample_sd = rep(0,6),
+                              runtimes_se = rep(0,6),
+                              sample_se = rep(0,6))
+for(i in seq(20,70,by=10)){
+  decstr <- paste0(i,"s")
+  samplei <- data %>% filter(decade == decstr) %>% sample_n(size=100)
+  results[(i/10)-1,] <- results %>% filter(decade == decstr) %>%
+    mutate(sample_mean = mean(samplei$runtimeMinutes),
+                     sample_sd = sd(samplei$runtimeMinutes)) %>%
+    mutate(runtimes_se = runtimes_sds/10,
+           sample_se = sample_sd/10)
+}
+results <- results %>% select(decade,runtimes_means,sample_mean,
+                              runtimes_sds,sample_sd,
+                              runtimes_se,sample_se)
+head(results)
+
+```
+
+Now, we're going to generate a sampling distribution by sampling 100 movies from
+each decade 1000 times, and getting the mean for each of those 1000 samples and
+plot them.  We then want to compare the standard error found from this sampling
+with the SE calculated using the sample sd and population sd calculated earlier.
+```{r}
+for(i in seq(20,70,by = 10)){
+  decstr <- paste0(i,"s")
+  decsamps <- data.frame(means = rep(0,1000),sds = rep(0,1000))
+  dec_pop <- data %>% filter(decade == decstr) %>% select(runtimeMinutes)
+  decsamps$means <- (do(1000) * mean(sample(dec_pop$runtimeMinutes,100)))$mean
+  decsamps$sds <- (do(1000) * sd(sample(dec_pop$runtimeMinutes,100)))$sd
+  
+  sampdist_mean <- mean(decsamps$means)
+  sampdist_sd <- sd(decsamps$sds)
+  print(histogram(decsamps$means,
+            main = paste("Histogram of sampling distribution for movies from the",decstr),
+            xlab = "Mean of sampled runtime"))
+  
+  print("Comparing estimates of SE")
+  print(paste("Decade =",decstr))
+  print(paste("Sampling Dist SE =",sampdist_sd))
+  print(paste("Sample SE        =",results$sample_se[which(results$decade == decstr)]))
+  print(paste("Population SE    =",results$runtimes_se[which(results$decade == decstr)]))
+  cat("\n")
+}
+```
+
+Visually inspecting the histograms produced, we can see that the sampling
+distribution in every decade is approximately normally distributed.
+
+# Challenge 2
+
+We'll now switch to a second dataset, which will be loaded in here:
+```{r}
+f <- "https://raw.githubusercontent.com/difiore/ada-2022-datasets/main/zombies.csv"
+data2 <- read_csv(f,col_names = TRUE)
+head(data2)
+```
+
+First, we're going to calculate the population-level mean and standard deviation
+for each quantitative field, those fields being Height, Weight, Age, Zombies
+Killed, and Years of Education.  Note that because we're dealing with
+*population*-level statistics here, we'll want to manually calculated the sd as
+$\sigma=\sqrt{SS/N}$ where $SS$ is the sum of squares, or the deviation of each
+data point from the mean.
+```{r}
+pop_stats <- data.frame(fields = c("height","weight","age","zombies_killed",
+                                   "years_of_education"),
+                        means = rep(0,5),SDs = rep(0,5))
+for(i in pop_stats$fields){
+  pop_stats[which(pop_stats$fields == i),"means"] <- mean(data2[[i]])
+  pop_stats[which(pop_stats$fields == i),"SDs"] <- 
+    sqrt(sum((data2[[i]] - mean(data2[[i]]))^2)/length(data2[[i]]))
+}
+head(pop_stats)
+
+```
+
+Now, to generate some plots using the data.  First, we make boxplots for each
+of the above variables by gender.
+```{r}
+for(i in pop_stats$fields){
+  p <- ggplot(data2,aes_string(x = "gender",y = i)) + geom_boxplot() +
+    ggtitle(paste(i,"by Gender"))
+  print(p)
+}
+```
+
+Now, making a scatterplot of the relationship between height and age, and weight
+and age.  Also, coloring each point by gender
+```{r}
+p1 <- ggplot(data2,aes(x = age,y = height,color = gender)) + geom_point() +
+  ggtitle("Height vs Age")
+p2 <- ggplot(data2,aes(x = age,y = weight,color = gender)) + geom_point() +
+  ggtitle("Weight vs Age")
+print(p1)
+print(p2)
+```
+
+When we generate these plots, we notice a few trends.  First, we can see a very
+strong positive correlation between age and height, meaning that across the 
+population, in general older age means taller height.  Likewise, there is a very
+slight positive correlation between weight and age but it is not nearly as
+strongly positive and the clustering of points around the best-fit line is not
+as tight.  We also see that height is very correlated with gender, as Males
+were, on average, significantly taller (~5 inches) than Females.  Again, there
+was also a slight correlation between weight and gender, with Males being
+heavier on average than Females, but it is difficult to see this difference from
+the scatter plot as the variance in weight given a certain age is much greater
+for both genders.  The difference in average weight between Males and Females is
+much more noticeable when comparing the boxplot of weight vs. gender.
+
+We now want to examine the normality of each of the variables above.  To do this
+we are going to first plot a histogram of the data and see if it looks
+approximately normal, then we'll back up our findings using QQ plots.
+```{r}
+for(i in pop_stats$fields){
+  hist(data2[[i]],main = paste("Histogram of",i),xlab = i,breaks = 20)
+  qqnorm(data2[[i]],
+         main = paste("Q-Q plot of",i,"folowing a normal distribution"),
+         xlab = i)
+  qqline(data2[[i]],col = "red")
+}
+```
+
+Visually inspecting these plots, it seems that height, weight, and age follow
+a normal distribution; this makes sense as each of these variables is 
+continuous.  However, the number of zombies killed and years of education
+variables do not follow a normal distribution because they are not continuous
+but are rather discrete variables (i.e., one cannot kill 2.7 zombies).  Thus,
+it appears that these variables are drawn from a Poisson distribution (each
+with some unknown parameter $\lambda$)
+
+Now, we'll sample 50 survivors and calculating the mean and standard deviation,
+as well as an estimate of standard error from the sample SD for each variable.
+Again, we will use our knowledge of $SE\approx\sigma_x/\sqrt{n}$ to calculate
+SE at this step.  We also want to calculate a 95% confidence interval for the
+single sample, which we can do by using the SE and knowing that 95% of a normal
+distribution falls between $\mu\pm1.96*SE$ where $\mu$ = sample mean; note that
+here we assume that the sampling distribution of means for each variable follows 
+a normal distribution.
+
+```{r}
+survivor_samp <- sample_n(data2,50)
+stats_tab <- data.frame(fields = c("height","weight","age","zombies_killed",
+                                   "years_of_education"),
+                        means = rep(0,5),SDs = rep(0,5),SEs = rep(0,5),
+                        lower_ci = rep(0,5),upper_ci = rep(0,5))
+for(i in 1:5){
+  stats_tab[i,"means"] <- mean(survivor_samp[[stats_tab$fields[i]]])
+  stats_tab[i,"SDs"] <- sd(survivor_samp[[stats_tab$fields[i]]])
+  stats_tab[i,"SEs"] <- stats_tab[i,"SDs"]/sqrt(50)
+  stats_tab[i,"lower_ci"] <- stats_tab[i,"means"] + 
+    stats_tab[i,"SEs"]*qnorm(0.025)
+  stats_tab[i,"upper_ci"] <- stats_tab[i,"means"] + 
+    stats_tab[i,"SEs"]*qnorm(0.975)
+}
+print(stats_tab)
+```
+
+We'll now perform this same sampling 200 times to develop a sampling 
+distribution for each variable, and use these sampling distributions to 
+calculate SE. We will also use the SEs calculated to estimate 95% confidence
+intervals for the mean of each variable.
+```{r}
+for(i in 1:5){
+  print(paste("Variable =",stats_tab$fields[i]))
+  means_i <- stats_tab$means[i]
+  means_i <- c(means_i,(do(199) * 
+                          mean(sample_n(data2,50)[[stats_tab$fields[i]]]))$mean)
+  hist(means_i,
+       main = paste("Histogram of estimates of the mean for",stats_tab$fields[i]),
+       xlab = stats_tab$fields[i],breaks = 20)
+  qqnorm(means_i,
+         main = paste("QQ Plot of estimates of the mean for",stats_tab$fields[i]))
+  qqline(means_i,col = "red")
+  print(paste("Mean Sample Dist mean  =",mean(means_i)))
+  print(paste("Mean Sample Dist SD    =",sd(means_i)))
+  print(paste("Previous SE            =",stats_tab$SEs[i]))
+  print(paste("Samp dist 95% Lower CI =",quantile(means_i,0.025)))
+  print(paste("Previous Lower CI      =",stats_tab$lower_ci[i]))
+  print(paste("Samp dist 95% Lower CI =",quantile(means_i,0.975)))
+  print(paste("Previous Upper CI      =",stats_tab$upper_ci[i]))
+  cat("\n")
+}
+```
+
+Based on the QQ plots we see that all of the sampling distributions are
+approximately normal with some slight deviations simply due to sample size; even
+variables which themselves were not normally distributed have sampling
+distributions which are normal.  The histograms do not visually appear to 
+conform very closely to a normal distribution, but they still have an 
+approximately normal shape with some expected deviation due to random sampling.
+
+The standard errors we observed from the 200 samples seem to be lower than the
+SEs calculated using the mean and standard deviation from a single sample.  We
+also notice that the width of CIs calculated from the single sample are in 
+general about the same as the CIs found from the 200-replication sampling 
+distribution, but the CIs calculated from the single sample are shifted compared
+to the CIs from the sampling distribution.
